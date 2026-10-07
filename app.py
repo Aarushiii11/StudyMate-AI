@@ -576,7 +576,67 @@ def load_embedding_model():
 # ============================================================
 # PDF FUNCTIONS
 # ============================================================
+def extract_image(image_bytes, mime_type):
 
+    client = get_gemini_client()
+
+    if client is None:
+        return ""
+
+    prompt = """
+Read the uploaded image as study material.
+
+Extract and understand all readable educational content from the image.
+
+Rules:
+- Preserve headings, definitions, formulas, code and important points.
+- Keep the information faithful to the image.
+- Do not invent information that is not visible.
+- If handwriting is readable, include it.
+- Return only the extracted study content.
+"""
+
+    models = [
+        "gemini-3.7-flash",
+        "gemini-3.5-flash-lite",
+    ]
+
+    for model_name in models:
+
+        for attempt in range(2):
+
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=[
+                        prompt,
+                        genai.types.Part.from_bytes(
+                            data=image_bytes,
+                            mime_type=mime_type
+                        )
+                    ]
+                )
+
+                if response and response.text:
+                    return response.text.strip()
+
+            except Exception as error:
+
+                error_text = str(error)
+
+                if (
+                    "503" in error_text
+                    or "UNAVAILABLE" in error_text
+                    or "high demand" in error_text.lower()
+                ):
+                    if attempt == 0:
+                        time.sleep(2)
+
+                    continue
+
+                break
+
+    return ""
 @st.cache_data(show_spinner=False)
 def extract_pdf(pdf_bytes):
 
@@ -1464,10 +1524,10 @@ with st.sidebar:
     st.caption("YOUR NOTES")
 
     uploaded_file = st.file_uploader(
-        "Upload PDF",
-        type=["pdf"],
-        label_visibility="collapsed"
-    )
+    "Upload Notes",
+    type=["pdf", "png", "jpg", "jpeg"],
+    label_visibility="collapsed"
+)
 
 
     # --------------------------------------------------------
@@ -1633,35 +1693,73 @@ if uploaded_file is None:
 # PROCESS PDF
 # ============================================================
 
-pdf_bytes = (
-    uploaded_file.getvalue()
-)
+# Get uploaded file bytes
+file_bytes = uploaded_file.getvalue()
 
-
-file_id = get_file_id(
-    pdf_bytes
-)
-
+file_id = get_file_id(file_bytes)
 
 if (
     st.session_state.current_file_id
     != file_id
 ):
-
-    st.session_state.current_file_id = (
-        file_id
-    )
-
+    st.session_state.current_file_id = file_id
     reset_document_state()
+
+
+# Detect uploaded file type
+file_type = uploaded_file.type
 
 
 with st.spinner(
     "Preparing your study material..."
 ):
 
-    pages, full_text = extract_pdf(
-        pdf_bytes
-    )
+    # --------------------------------------------------------
+    # PDF
+    # --------------------------------------------------------
+
+    if file_type == "application/pdf":
+
+        pages, full_text = extract_pdf(
+            file_bytes
+        )
+
+    # --------------------------------------------------------
+    # IMAGE
+    # --------------------------------------------------------
+
+    elif file_type in [
+        "image/png",
+        "image/jpeg"
+    ]:
+
+        image_text = extract_image(
+            file_bytes,
+            file_type
+        )
+
+        pages = [
+            {
+                "page": 1,
+                "text": image_text
+            }
+        ]
+
+        full_text = image_text
+
+    else:
+
+        st.error(
+            "Unsupported file type. "
+            "Please upload a PDF, PNG, JPG or JPEG file."
+        )
+
+        st.stop()
+
+
+    # --------------------------------------------------------
+    # CREATE STUDY CHUNKS
+    # --------------------------------------------------------
 
     chunks = make_chunks(
         pages
@@ -1672,25 +1770,42 @@ with st.spinner(
         for chunk in chunks
     ]
 
-    embeddings = create_embeddings(
-        chunk_texts
-    )
+    if chunk_texts:
 
+        embeddings = create_embeddings(
+            chunk_texts
+        )
+
+    else:
+
+        embeddings = np.array([])
+
+
+# ------------------------------------------------------------
+# CHECK THAT CONTENT WAS EXTRACTED
+# ------------------------------------------------------------
 
 if not full_text.strip():
 
-    st.error(
-        "I couldn't extract readable text from this PDF. "
-        "It may contain scanned images instead of "
-        "selectable text."
-    )
+    if file_type == "application/pdf":
+
+        st.error(
+            "I couldn't extract readable text from this PDF. "
+            "It may contain scanned images instead of selectable text."
+        )
+
+    else:
+
+        st.error(
+            "I couldn't read enough study content from this image. "
+            "Try uploading a clearer image."
+        )
 
     st.stop()
 
 
 # Limit large prompts for now
 note_context = full_text[:30000]
-
 
 # ============================================================
 # DASHBOARD
