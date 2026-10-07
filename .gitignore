@@ -1,0 +1,22 @@
+# Virtual environment
+venv/
+
+# Streamlit secrets - protects Gemini API key
+.streamlit/secrets.toml
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment variable files
+.env
+.env.*
+
+# VS Code settings
+.vscode/
+
+# Operating system files
+.DS_Store
+Thumbs.db
