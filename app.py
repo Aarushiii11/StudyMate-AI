@@ -513,9 +513,8 @@ def ask_gemini(prompt):
 
     if client is None:
         return (
-            "Gemini API key was not found. "
-            "Add GEMINI_API_KEY to "
-            ".streamlit/secrets.toml."
+            "StudyMate couldn't connect to the AI service. "
+            "Please try again in a moment."
         )
 
     models = [
@@ -523,30 +522,45 @@ def ask_gemini(prompt):
         "gemini-3.5-flash-lite",
     ]
 
-    last_error = None
-
+    # Try each model up to 2 times
     for model_name in models:
 
-        try:
+        for attempt in range(2):
 
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt
-            )
+            try:
 
-            if response and response.text:
-                return response.text.strip()
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt
+                )
 
-        except Exception as error:
-            last_error = error
-            continue
+                if response and response.text:
+                    return response.text.strip()
+
+            except Exception as error:
+
+                error_text = str(error)
+
+                # Temporary Gemini overload
+                if (
+                    "503" in error_text
+                    or "UNAVAILABLE" in error_text
+                    or "high demand" in error_text.lower()
+                ):
+
+                    # Wait briefly before retrying
+                    if attempt == 0:
+                        time.sleep(2)
+
+                    continue
+
+                # Other error - try next model
+                break
 
     return (
-        "The AI service is temporarily unavailable. "
-        "Please try again in a moment.\n\n"
-        f"Technical details: {last_error}"
+        "StudyMate's AI service is busy right now. "
+        "Please try your question again in a few moments."
     )
-
 # ============================================================
 # EMBEDDING MODEL
 # ============================================================
